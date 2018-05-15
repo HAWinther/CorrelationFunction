@@ -6,6 +6,9 @@
 #include <gsl/gsl_odeiv2.h>
 #include <gsl/gsl_integration.h>
 #include <gsl/gsl_spline.h>
+#ifdef OMP
+#include <omp.h>
+#endif
 #define MIN(x,y) (x > y ? y : x)
 #define MAX(x,y) (x > y ? x : y)
 #define pow2(x) ((x)*(x))
@@ -15,7 +18,8 @@
 //====================================================
 // 
 // Very simple code to compute the radial monopole correlation
-// function for data from a galaxy survey / mocks
+// function for data from a galaxy survey / mocks. Using
+// grids to speed it up.
 // Same (or a bit faster) speed as CUTE with OpenMP
 //
 // Input: galaxyfile, randomfile, nbins, rmax and OmegaM
@@ -34,19 +38,6 @@
 // Written by Hans Winther (2018)
 //
 //====================================================
-
-//====================================================
-// OpenMP
-//====================================================
-#define OMP
-#ifdef OMP
-#include <omp.h>
-#endif
-
-//====================================================
-// Include weights?
-//====================================================
-#define WEIGHTS
 
 //====================================================
 // A single galaxy
@@ -128,8 +119,8 @@ void free_binning(PairCountBinning *pc);
 void add_galaxies_to_cells(Grid *grid, GalaxyCatalog *cat);
 void brute_force_pair_counting(GalaxyCatalog *cat, PairCountBinning *pc);
 void brute_force_cross_pair_counting(GalaxyCatalog *cat, GalaxyCatalog *cat2, PairCountBinning *pc);
-void linked_list_pair_counting(Grid *grid, PairCountBinning *pc);
-void linked_list_cross_pair_counting(Grid *grid, Grid *grid2, PairCountBinning *pc);
+void grid_pair_counting(Grid *grid, PairCountBinning *pc);
+void grid_cross_pair_counting(Grid *grid, Grid *grid2, PairCountBinning *pc);
 void compute_correlation_function(PairCountBinning *DD, PairCountBinning *DR, PairCountBinning *RR, char *filename);
 void outputGalaxies(GalaxyCatalog *cat, char *filename);
 void compute_boxsize_shift_positions(GalaxyCatalog *cat, GalaxyCatalog *cat2, double *box);
@@ -145,7 +136,6 @@ double r_of_z(double z);
 //====================================================
 
 int main(int argc, char **argv){
-  setvbuf(stdout, NULL, _IONBF, 0);
 
   //====================================================
   // Read parameters from stdin
@@ -155,9 +145,6 @@ int main(int argc, char **argv){
     exit(1);
   }
 
-  //====================================================
-  // Parameters
-  //====================================================
   char *filename_galaxies = argv[1];
   char *filename_random   = argv[2];
   char *filename_output   = argv[3];
@@ -248,9 +235,9 @@ int main(int argc, char **argv){
   brute_force_cross_pair_counting(random_cat, galaxy_cat, DR);
   brute_force_pair_counting(random_cat, RR);
 #else
-  linked_list_pair_counting(galaxy_grid, DD);
-  linked_list_cross_pair_counting(galaxy_grid, random_grid, DR);
-  linked_list_pair_counting(random_grid, RR);
+  grid_pair_counting(galaxy_grid, DD);
+  grid_cross_pair_counting(galaxy_grid, random_grid, DR);
+  grid_pair_counting(random_grid, RR);
 #endif
   compute_correlation_function(DD, DR, RR, filename_output);
     
@@ -505,9 +492,9 @@ void brute_force_cross_pair_counting(GalaxyCatalog *cat, GalaxyCatalog *cat2, Pa
 }
 
 //====================================================
-// Linked list pair counting. Use the grid to speed it up
+// Pair counting using grid to speed it up
 //====================================================
-void linked_list_pair_counting(Grid *grid, PairCountBinning *pc){
+void grid_pair_counting(Grid *grid, PairCountBinning *pc){
   // Fetch data from grid
   Cell *cells   = grid->cells;
   int ngrid     = grid->ngrid;
@@ -1004,11 +991,11 @@ void add_galaxies_to_cells(Grid *grid, GalaxyCatalog *cat){
 }
 
 //====================================================
-// Linked list cross pair counts
+// Cross pair counts using grid to speed it up
 // Cross seems to be faster if we loop over the coarsest 
 // grid first so call in order (galaxy_grid, random_grid)
 //====================================================
-void linked_list_cross_pair_counting(Grid *grid, Grid *grid2, PairCountBinning *pc){
+void grid_cross_pair_counting(Grid *grid, Grid *grid2, PairCountBinning *pc){
   // Fetch data from the grid
   Cell *cells    = grid->cells;
   int ngrid      = grid->ngrid;
