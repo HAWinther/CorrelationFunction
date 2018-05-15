@@ -2,7 +2,7 @@
 Author: Hans A. Winther, 2018
 
 Very simple code to compute the radial monopole correlation function for data from a galaxy survey / mocks.
-Written for test purposes, but has the same (or faster) speed as [CUTE](https://github.com/damonge/CUTE) with OpenMP
+Written for test purposes and well commented so should be very easy to modify. Has the same (or faster) speed as [CUTE](https://github.com/damonge/CUTE) with OpenMP (but does not have half of the features as CUTE so use this instead).
 
 Input: galaxyfile, randomfile, nbins, rmax and OmegaM
 Output: [xi(r), err(r), DD(r), DR(r), RR(r)]
