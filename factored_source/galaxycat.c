@@ -12,10 +12,12 @@ void free_cat(GalaxyCatalog *cat);
 GalaxyCatalog *read_galaxies_from_file(char *filename, int ngalaxies){
   int i;
 
-  printf("\n====================================\n"); 
-  printf("Reading from file [%s]\n", filename); 
-  printf("====================================\n"); 
-  printf("Galaxy file has %d galaxies\n",ngalaxies);
+  if(mpi_rank == 0){
+    printf("\n====================================\n"); 
+    printf("Reading from file [%s]\n", filename); 
+    printf("====================================\n"); 
+    printf("Galaxy file has %d galaxies\n",ngalaxies);
+  }
 
   // Allocate particle array
   GalaxyCatalog *cat = malloc(sizeof(GalaxyCatalog));
@@ -23,7 +25,7 @@ GalaxyCatalog *read_galaxies_from_file(char *filename, int ngalaxies){
   Galaxy *allgalaxies = cat->galaxies;
   cat->ngalaxies = ngalaxies;
   cat->allocated = 1;
-    
+
   double sum_w = 0.0, sum_w2 = 0.0;
 
   // Read the data
@@ -62,9 +64,10 @@ GalaxyCatalog *read_galaxies_from_file(char *filename, int ngalaxies){
     sum_w2 += w*w;
   }
   fclose(fp);
-  
+
   // The mean weight and RMS
-  printf("Mean weight: %lf  RMS: %lf\n", sum_w/(double)ngalaxies, sqrt(sum_w2/(double)ngalaxies));
+  if(mpi_rank == 0)
+    printf("Mean weight: %lf  RMS: %lf\n", sum_w/(double)ngalaxies, sqrt(sum_w2/(double)ngalaxies));
   cat->sum_w = sum_w;
   cat->sum_w2 = sum_w2;
 
@@ -81,12 +84,12 @@ void compute_boxsize_shift_positions(GalaxyCatalog *cat, GalaxyCatalog *cat2, do
   Galaxy *galaxies = cat->galaxies;
   int ngalaxies2 = cat2->ngalaxies;
   Galaxy *galaxies2 = cat2->galaxies;
-  
+
   // Compute max and min position
   double max_x = -1e100, min_x = 1e100;
   double max_y = -1e100, min_y = 1e100;
   double max_z = -1e100, min_z = 1e100;
- 
+
   int i;
   for(i = 0; i < ngalaxies; i++){
     double *Pos = &galaxies[i].x[0];
@@ -127,16 +130,19 @@ void compute_boxsize_shift_positions(GalaxyCatalog *cat, GalaxyCatalog *cat2, do
   max_z = max_z-min_z;
 
   // The min/max positions (separations)
-  printf("\n====================================\n");
-  printf("Shifting particles and computing boxsize:\n");
-  printf("====================================\n");
-  printf("Min/Max X position: 0.0 -> %5.2lf Mpc/h\n", max_x);
-  printf("Min/Max Y position: 0.0 -> %5.2lf Mpc/h\n", max_y);
-  printf("Min/Max Z position: 0.0 -> %5.2lf Mpc/h\n", max_z);
-  
+  if(mpi_rank == 0){
+    printf("\n====================================\n");
+    printf("Shifting particles and computing boxsize:\n");
+    printf("====================================\n");
+    printf("Min/Max X position: 0.0 -> %5.2lf Mpc/h\n", max_x);
+    printf("Min/Max Y position: 0.0 -> %5.2lf Mpc/h\n", max_y);
+    printf("Min/Max Z position: 0.0 -> %5.2lf Mpc/h\n", max_z);
+  }
+
   // The largest displacement in either direction
   *box = 1.01 * MAX(max_x, MAX(max_y, max_z));
-  printf("The boxsize we will use is %5.2lf Mpc/h\n", *box);
+  if(mpi_rank == 0)
+    printf("The boxsize we will use is %5.2lf Mpc/h\n", *box);
 }
 
 //====================================================
@@ -166,6 +172,8 @@ void free_cat(GalaxyCatalog *cat){
 // Output galaxy catalog in physical coordinates
 //====================================================
 void outputGalaxies(GalaxyCatalog *cat, char *filename){
+  if(mpi_rank != 0) return;
+  
   int ngalaxies = cat->ngalaxies;
   Galaxy *galaxies = cat->galaxies;
   FILE *fp = fopen(filename, "w");

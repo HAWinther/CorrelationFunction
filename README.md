@@ -17,7 +17,9 @@ Defines:
 
 - WEIGHTS : Use weighted galaxies
 
-- OMP : Parallelize using OpenMP
+- USE\_OMP : Parallelize using OpenMP
+
+- USE\_MPI : Parallelize using MPI
 
 - BRUTEFORCE : Brute-force pair-counts instead of grid
 

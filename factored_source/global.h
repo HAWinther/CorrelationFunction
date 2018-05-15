@@ -1,9 +1,14 @@
 #ifndef _GLOBAL_H
 #define _GLOBAL_H
 
-#ifdef OMP
+#ifdef USE_OMP
 #include <omp.h>
+#elif defined(USE_MPI)
+#include <mpi.h>
 #endif
+
+extern int mpi_rank;
+extern int mpi_size;
 
 #define MIN(x,y) (x > y ? y : x)
 #define MAX(x,y) (x > y ? x : y)

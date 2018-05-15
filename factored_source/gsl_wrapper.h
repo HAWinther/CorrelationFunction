@@ -6,6 +6,7 @@
 #include <gsl/gsl_odeiv2.h>
 #include <gsl/gsl_integration.h>
 #include <gsl/gsl_spline.h>
+#include "global.h"
 
 //====================================================
 // GSL spline

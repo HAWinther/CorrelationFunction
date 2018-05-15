@@ -6,8 +6,10 @@
 #include <gsl/gsl_odeiv2.h>
 #include <gsl/gsl_integration.h>
 #include <gsl/gsl_spline.h>
-#ifdef OMP
+#ifdef USE_OMP
 #include <omp.h>
+#elif defined(USE_MPI)
+#include <mpi.h>
 #endif
 #define MIN(x,y) (x > y ? y : x)
 #define MAX(x,y) (x > y ? x : y)
@@ -30,7 +32,8 @@
 //
 // Defines:
 // WEIGHTS : Use weights in galaxy mock
-// OMP : Parallelize using OpenMP
+// USE_OMP : Parallelize using OpenMP
+// USE_MPI : Parallelize using MPI
 // BRUTEFORCE : Brute-force pair-counts
 // OUTPUT_PAIRS_TO_SCREEN : print paircount to screen
 // as we go along
@@ -38,6 +41,8 @@
 // Written by Hans Winther (2018)
 //
 //====================================================
+
+int mpi_rank = 0, mpi_size = 1;
 
 //====================================================
 // A single galaxy
@@ -137,11 +142,18 @@ double r_of_z(double z);
 
 int main(int argc, char **argv){
 
+#ifdef USE_MPI
+  MPI_Init(&argc, &argv);
+  MPI_Comm_rank(MPI_COMM_WORLD, &mpi_rank);
+  MPI_Comm_size(MPI_COMM_WORLD, &mpi_size);
+#endif
+
   //====================================================
   // Read parameters from stdin
   //====================================================
   if(argc < 7){
-    printf("Run as ./corr [filename_mock] [filename_random] [filename_output] [nbins] [rmax] [OmegaM]\n");
+    if(mpi_rank == 0) 
+      printf("Run as ./corr [filename_mock] [filename_random] [filename_output] [nbins] [rmax] [OmegaM]\n");
     exit(1);
   }
 
@@ -153,33 +165,38 @@ int main(int argc, char **argv){
   double OmegaM           = atof(argv[6]);
   double box;
 
-  printf("\n====================================\n");
-  printf("Parameters:\n");
-  printf("====================================\n");
-  printf("Galaxy Catalog: [%s]\n", filename_galaxies);
-  printf("Random Catalog: [%s]\n", filename_random);
-  printf("Rmax:           [%5.2lf] Mpc/h\n", rmax);
-  printf("nbins:          [%i]\n", nbins);
-  printf("OmegaM:         [%0.3lf]\n", OmegaM);
+  if(mpi_rank == 0){
+    printf("\n====================================\n");
+    printf("Parameters:\n");
+    printf("====================================\n");
+    printf("Galaxy Catalog: [%s]\n", filename_galaxies);
+    printf("Random Catalog: [%s]\n", filename_random);
+    printf("Rmax:           [%5.2lf] Mpc/h\n", rmax);
+    printf("nbins:          [%i]\n", nbins);
+    printf("OmegaM:         [%0.3lf]\n", OmegaM);
 #ifdef WEIGHTS
-  printf("We are including the weights\n");
+    printf("We are including the weights\n");
 #else  
-  printf("We are NOT including the weights\n");
+    printf("We are NOT including the weights\n");
 #endif
 #ifdef BRUTEFORCE
-  printf("Will compute pair counts BRUTE-FORCE\n");
+    printf("Will compute pair counts BRUTE-FORCE\n");
 #endif
-#ifdef OMP
+#ifdef USE_OMP
 #pragma omp parallel
-  {
-    if(omp_get_thread_num() == 0) 
-      printf("We are using OpenMP nthreads = %i\n", omp_get_num_threads());
-  }
+    {
+      if(omp_get_thread_num() == 0) 
+        printf("We are using OpenMP nthreads = %i\n", omp_get_num_threads());
+    }
+#elif defined(USE_MPI)
+    if(mpi_rank == 0)
+      printf("We are using MPI nsize = %i\n", mpi_size);
 #else
-  printf("We are NOT using OpenMP\n");
+    printf("We are NOT using OpenMP or MPI\n");
 #endif
-  printf("====================================\n");
-  
+    printf("====================================\n");
+  }
+
   //====================================================
   // Create a spline of r(z)
   //====================================================
@@ -240,7 +257,7 @@ int main(int argc, char **argv){
   grid_pair_counting(random_grid, RR);
 #endif
   compute_correlation_function(DD, DR, RR, filename_output);
-    
+
   //====================================================
   // Free up memory allocated above
   //====================================================
@@ -253,6 +270,9 @@ int main(int argc, char **argv){
   free_binning(RR);
   Free_GSL_Spline(global_spline_rofz);
 
+#ifdef USE_MPI
+  MPI_Finalize();
+#endif
   return 0;
 }
 
@@ -283,11 +303,13 @@ void brute_force_pair_counting(GalaxyCatalog *cat, PairCountBinning *pc){
   
   // Initialize OpenMP
   int nthreads = 1, id = 0;
-#ifdef OMP 
+#ifdef USE_OMP 
 #pragma omp parallel
   {
     if(omp_get_thread_num() == 0) nthreads = omp_get_num_threads();
   }
+#elif defined(USE_MPI)
+  nthreads = mpi_size;
 #endif
 
   // Initialize binning
@@ -300,19 +322,28 @@ void brute_force_pair_counting(GalaxyCatalog *cat, PairCountBinning *pc){
     }
   }
 
-  printf("\n====================================\n");
-  printf("Brute-force pair counting:\n");
-  printf("====================================\n");
-  printf("Using n = %i threads\n", nthreads);
+  if(mpi_rank == 0){
+    printf("\n====================================\n");
+    printf("Brute-force pair counting:\n");
+    printf("====================================\n");
+    printf("Using n = %i threads\n", nthreads);
+  }
 
   // Double loop over all pairs of galaxies
   clock_t start = clock(), diff;
-#ifdef OMP
+  int istart = 0, iend = ngalaxies;
+#ifdef USE_OMP
 #pragma omp parallel for private(id) reduction(+:pairs_dist2) reduction(+:pairs_dist) schedule(dynamic)
+#elif defined(USE_MPI)
+  int i_per_task = ngalaxies / nthreads;
+  istart = i_per_task * mpi_rank;
+  iend   = MIN( i_per_task * (mpi_rank + 1), ngalaxies);
 #endif
-  for(i = 0; i < ngalaxies; i++){
-#ifdef OMP
+  for(i = istart; i < iend; i++){
+#ifdef USE_OMP
     id = omp_get_thread_num();
+#elif defined(USE_MPI)
+    id = mpi_rank;
 #else
     id = 0;
 #endif
@@ -320,7 +351,7 @@ void brute_force_pair_counting(GalaxyCatalog *cat, PairCountBinning *pc){
     int j;
     for(j = i+1; j < ngalaxies; j++){
       Galaxy *p2 = &allgalaxies[j];
-     
+
       // Distance between galaxies
       double dist2 = pow2(p1->x[0] - p2->x[0]);
       dist2 += pow2(p1->x[1] - p2->x[1]);
@@ -347,6 +378,16 @@ void brute_force_pair_counting(GalaxyCatalog *cat, PairCountBinning *pc){
     }
   }
 
+#ifdef USE_MPI
+  // Gather data from all CPUs
+  double *recv = malloc(sizeof(double)*nbins*nthreads);
+  MPI_Allgather(XX_threads[mpi_rank], nbins, MPI_DOUBLE, recv, nbins, MPI_DOUBLE, MPI_COMM_WORLD);
+  for(id = 0; id < nthreads; id++)
+    for(i = 0; i < nbins; i++)
+      XX_threads[id][i] = recv[id * nbins + i];
+  free(recv);
+#endif
+
   // Sum up results from different threads
   for(id = 0; id < nthreads; id++){
     for(i = 0; i < nbins; i++){
@@ -358,19 +399,23 @@ void brute_force_pair_counting(GalaxyCatalog *cat, PairCountBinning *pc){
 
   // Show timing and how many dist^2 and square roots we had to compute
   diff = clock() - start;
-  printf("We have computed dist^2 for [%.0lf] pairs out of [%.0lf]. That is %lf%%\n", pairs_dist2, 
-      (double)ngalaxies * (double)ngalaxies/2.0, pairs_dist2/((double)ngalaxies*(double) ngalaxies/2.0) * 100.0);
-  printf("We have computed sqrt(dist^2) for [%.0lf] pairs out of [%.0lf]. That is %lf%%\n", pairs_dist, 
-      (double)ngalaxies * (double)ngalaxies/2.0, pairs_dist/((double)ngalaxies*(double) ngalaxies/2.0) * 100.0);
-  printf("This took: [%8.3lf] sec\n", (double)(1000 * diff / CLOCKS_PER_SEC)/1000.0);
+  if(mpi_rank == 0){
+    printf("We have computed dist^2 for [%.0lf] pairs out of [%.0lf]. That is %lf%%\n", pairs_dist2, 
+        (double)ngalaxies * (double)ngalaxies/2.0, pairs_dist2/((double)ngalaxies*(double) ngalaxies/2.0) * 100.0);
+    printf("We have computed sqrt(dist^2) for [%.0lf] pairs out of [%.0lf]. That is %lf%%\n", pairs_dist, 
+        (double)ngalaxies * (double)ngalaxies/2.0, pairs_dist/((double)ngalaxies*(double) ngalaxies/2.0) * 100.0);
+    printf("This took: [%8.3lf] sec\n", (double)(1000 * diff / CLOCKS_PER_SEC)/1000.0);
+  }
 
 #ifdef OUTPUT_PAIRS_TO_SCREEN
   // Output pair counts
-  printf("r          XX(r):\n");
+  if(mpi_rank == 0)
+    printf("r          XX(r):\n");
   for(i = 0; i < nbins; i++){
     double r = rmax / (double) nbins * (i+0.5);
     double xi = XX[i];
-    printf("%lf   %lf\n", r, xi);    
+    if(mpi_rank == 0)
+      printf("%lf   %lf\n", r, xi);    
   }
 #endif
 }
@@ -382,28 +427,30 @@ void brute_force_cross_pair_counting(GalaxyCatalog *cat, GalaxyCatalog *cat2, Pa
   // Fetch data from galaxy catalog
   Galaxy *allgalaxies = cat->galaxies;
   int ngalaxies       = cat->ngalaxies;
-  
+
   // Fetch data from galaxy catalog2
   Galaxy *allgalaxies2 = cat2->galaxies;
   int ngalaxies2       = cat2->ngalaxies;
-  
+
   // Fetch data from binning
   int nbins   = pc->nbins;
   double rmax = pc->rmax;
   double *XY  = pc->paircount;
-  
+
   // Other variables
   double pairs_dist = 0.0, pairs_dist2 = 0.0;
   double nbins_over_rmax = nbins / rmax, rmax2 = rmax * rmax;
   int i;
-  
+
   // Initialize OpenMP
   int nthreads = 1, id;
-#ifdef OMP 
+#ifdef USE_OMP 
 #pragma omp parallel
   {
     if(omp_get_thread_num() == 0) nthreads = omp_get_num_threads();
   }
+#elif defined(USE_MPI)
+  nthreads = mpi_size;
 #endif
 
   // Initialize binning
@@ -416,19 +463,28 @@ void brute_force_cross_pair_counting(GalaxyCatalog *cat, GalaxyCatalog *cat2, Pa
     }
   }
 
-  printf("\n====================================\n");
-  printf("Brute-force cross pair counting:\n");
-  printf("====================================\n");
-  printf("Using n = %i threads\n", nthreads);
+  if(mpi_rank == 0){
+    printf("\n====================================\n");
+    printf("Brute-force cross pair counting:\n");
+    printf("====================================\n");
+    printf("Using n = %i threads\n", nthreads);
+  }
 
   // Double loop over all pairs of galaxies
   clock_t start = clock(), diff;
-#ifdef OMP
+  int istart = 0, iend = ngalaxies;
+#ifdef USE_OMP
 #pragma omp parallel for private(id) reduction(+:pairs_dist2) reduction(+:pairs_dist) schedule(dynamic)
+#elif defined(USE_MPI)
+  int i_per_task = ngalaxies / nthreads;
+  istart = i_per_task * mpi_rank;
+  iend   = MIN( i_per_task * (mpi_rank + 1), ngalaxies);
 #endif
-  for(i = 0; i < ngalaxies; i++){
-#ifdef OMP
+  for(i = istart; i < iend; i++){
+#ifdef USE_OMP
     id = omp_get_thread_num();
+#elif defined(USE_MPI)
+    id = mpi_rank;
 #else
     id = 0;
 #endif
@@ -436,7 +492,7 @@ void brute_force_cross_pair_counting(GalaxyCatalog *cat, GalaxyCatalog *cat2, Pa
     int j;
     for(j = 0; j < ngalaxies2; j++){
       Galaxy *p2 = &allgalaxies2[j];
-     
+
       // Distance between galaxies
       double dist2 = pow2(p1->x[0] - p2->x[0]);
       dist2 += pow2(p1->x[1] - p2->x[1]);
@@ -463,6 +519,16 @@ void brute_force_cross_pair_counting(GalaxyCatalog *cat, GalaxyCatalog *cat2, Pa
     }
   }
 
+#ifdef USE_MPI
+  // Gather data from all CPUs
+  double *recv = malloc(sizeof(double)*nbins*nthreads);
+  MPI_Allgather(XY_threads[mpi_rank], nbins, MPI_DOUBLE, recv, nbins, MPI_DOUBLE, MPI_COMM_WORLD);
+  for(id = 0; id < nthreads; id++)
+    for(i = 0; i < nbins; i++)
+      XY_threads[id][i] = recv[id * nbins + i];
+  free(recv);
+#endif
+
   // Sum up results from different threads
   for(id = 0; id < nthreads; id++){
     for(i = 0; i < nbins; i++){
@@ -474,19 +540,23 @@ void brute_force_cross_pair_counting(GalaxyCatalog *cat, GalaxyCatalog *cat2, Pa
 
   // Show timing and how many dist^2 and square roots we had to compute
   diff = clock() - start;
-  printf("We have computed dist^2 for [%.0lf] pairs out of [%.0lf]. That is %lf%%\n", pairs_dist2, 
-      (double)ngalaxies * (double)ngalaxies2, pairs_dist2/((double)ngalaxies*(double) ngalaxies2) * 100.0);
-  printf("We have computed sqrt(dist^2) for [%.0lf] pairs out of [%.0lf]. That is %lf%%\n", pairs_dist, 
-      (double)ngalaxies * (double)ngalaxies2, pairs_dist/((double)ngalaxies*(double) ngalaxies2) * 100.0);
-  printf("This took: [%8.3lf] sec\n", (double)(1000 * diff / CLOCKS_PER_SEC)/1000.0);
+  if(mpi_rank == 0){
+    printf("We have computed dist^2 for [%.0lf] pairs out of [%.0lf]. That is %lf%%\n", pairs_dist2, 
+        (double)ngalaxies * (double)ngalaxies2, pairs_dist2/((double)ngalaxies*(double) ngalaxies2) * 100.0);
+    printf("We have computed sqrt(dist^2) for [%.0lf] pairs out of [%.0lf]. That is %lf%%\n", pairs_dist, 
+        (double)ngalaxies * (double)ngalaxies2, pairs_dist/((double)ngalaxies*(double) ngalaxies2) * 100.0);
+    printf("This took: [%8.3lf] sec\n", (double)(1000 * diff / CLOCKS_PER_SEC)/1000.0);
+  }
 
 #ifdef OUTPUT_PAIRS_TO_SCREEN
   // Output cross pair counts
-  printf("r          XY(r):\n");
+  if(mpi_rank == 0)
+    printf("r          XY(r):\n");
   for(i = 0; i < nbins; i++){
     double r = rmax / (double) nbins * (i+0.5);
     double xi = XY[i];
-    printf("%lf   %lf\n", r, xi);    
+    if(mpi_rank == 0)
+      printf("%lf   %lf\n", r, xi);    
   }
 #endif
 }
@@ -516,11 +586,13 @@ void grid_pair_counting(Grid *grid, PairCountBinning *pc){
 
   // Initialize OpenMP
   int nthreads = 1, id = 0;
-#ifdef OMP 
+#ifdef USE_OMP 
 #pragma omp parallel
   {
     if(omp_get_thread_num() == 0) nthreads = omp_get_num_threads();
   }
+#elif defined(USE_MPI)
+  nthreads = mpi_size;
 #endif
 
   // Initialize binning
@@ -533,15 +605,18 @@ void grid_pair_counting(Grid *grid, PairCountBinning *pc){
     }
   }
 
-  printf("\n====================================\n");
-  printf("Pair counting using grid:\n");
-  printf("====================================\n");
-  printf("Using n = %i threads\n", nthreads);
+  if(mpi_rank == 0){
+    printf("\n====================================\n");
+    printf("Pair counting using grid:\n");
+    printf("====================================\n");
+    printf("Using n = %i threads\n", nthreads);
+  }
 
   // How many cells in each direction we must search
   int delta_ncells = (int)(ceil(rmax / cell_size)) + 1;
-  printf("We will go left and right: [%i] cells. The corresponding distance: +/-[%lf] Mpc/h\n", 
-      delta_ncells,  delta_ncells * cell_size);
+  if(mpi_rank == 0)
+    printf("We will go left and right: [%i] cells. The corresponding distance: +/-[%lf] Mpc/h\n", 
+        delta_ncells,  delta_ncells * cell_size);
 
   //==========================================================
   // Loop over all the cells
@@ -551,12 +626,20 @@ void grid_pair_counting(Grid *grid, PairCountBinning *pc){
 
   int ix0, num_processed = 0;
   clock_t start = clock(), diff;
-#ifdef OMP 
+  int istart = 0, iend = max_ix + 1;
+#ifdef USE_OMP 
 #pragma omp parallel for private(id) reduction(+:pairs_dist2) reduction(+:pairs_dist) schedule(dynamic)
+#elif defined(USE_MPI)
+  int i_per_task = (max_ix + 1) / nthreads;
+  istart = i_per_task * mpi_rank;
+  iend   = i_per_task * (mpi_rank + 1);
+  if(mpi_rank == mpi_size - 1) iend = max_ix + 1;
 #endif
-  for(ix0 = 0; ix0 <= max_ix; ix0++){
-#ifdef OMP 
+  for(ix0 = istart; ix0 < iend; ix0++){
+#ifdef USE_OMP 
     id = omp_get_thread_num();
+#elif defined(USE_MPI)
+    id = mpi_rank;
 #else
     id = 0;
 #endif
@@ -602,7 +685,7 @@ void grid_pair_counting(Grid *grid, PairCountBinning *pc){
 
                 // Index of neighboring cell
                 int index_neighbor_cell = (ix*ngrid + iy)*ngrid + iz;
-                
+
                 // Pointer to neighboring cell
                 Cell *neighborcell = &cells[index_neighbor_cell];
 
@@ -617,7 +700,7 @@ void grid_pair_counting(Grid *grid, PairCountBinning *pc){
                 // Loop over galaxies in neighbor cells
                 int ipart_neighbor_cell;
                 for(ipart_neighbor_cell = istart_nbor_cell; ipart_neighbor_cell < npart_neighbor_cell; ipart_neighbor_cell++){
-                  
+
                   // Galaxy in neighboring cell
                   Galaxy *curpart_neighbor_cell = &neighborcell->galaxy[ipart_neighbor_cell];
 
@@ -658,12 +741,24 @@ void grid_pair_counting(Grid *grid, PairCountBinning *pc){
     }
 
     // Show progress...
+#ifdef USE_OMP
 #pragma omp critical
     {
       printf("Processed (%4i / %4i)   (ThreadID: %3i)\n", num_processed, max_ix, id);
       num_processed++;
     }
+#endif
   }
+
+#ifdef USE_MPI
+  // Gather results from all CPUs
+  double *recv = malloc(sizeof(double)*nbins*nthreads);
+  MPI_Allgather(XX_threads[mpi_rank], nbins, MPI_DOUBLE, recv, nbins, MPI_DOUBLE, MPI_COMM_WORLD);
+  for(id = 0; id < nthreads; id++)
+    for(i = 0; i < nbins; i++)
+      XX_threads[id][i] = recv[id * nbins + i];
+  free(recv);
+#endif
 
   // Sum up results from different threads
   for(id = 0; id < nthreads; id++){
@@ -676,19 +771,23 @@ void grid_pair_counting(Grid *grid, PairCountBinning *pc){
 
   // Show timing and how many dist^2 and square roots we had to compute
   diff = clock() - start;
-  printf("We have computed dist^2 for [%.0lf] pairs out of [%.0lf]. That is %lf%%\n", pairs_dist2, 
-      (double)ngalaxies * (double)ngalaxies/2.0, pairs_dist2/((double)ngalaxies*(double) ngalaxies/2.0) * 100.0);
-  printf("We have computed sqrt(dist^2) for [%.0lf] pairs out of [%.0lf]. That is %lf%%\n", pairs_dist, 
-      (double)ngalaxies * (double)ngalaxies/2.0, pairs_dist/((double)ngalaxies*(double) ngalaxies/2.0) * 100.0);
-  printf("This took: [%8.3lf] sec\n", (double)(1000 * diff / CLOCKS_PER_SEC)/1000.0);
+  if(mpi_rank == 0){
+    printf("We have computed dist^2 for [%.0lf] pairs out of [%.0lf]. That is %lf%%\n", pairs_dist2, 
+        (double)ngalaxies * (double)ngalaxies/2.0, pairs_dist2/((double)ngalaxies*(double) ngalaxies/2.0) * 100.0);
+    printf("We have computed sqrt(dist^2) for [%.0lf] pairs out of [%.0lf]. That is %lf%%\n", pairs_dist, 
+        (double)ngalaxies * (double)ngalaxies/2.0, pairs_dist/((double)ngalaxies*(double) ngalaxies/2.0) * 100.0);
+    printf("This took: [%8.3lf] sec\n", (double)(1000 * diff / CLOCKS_PER_SEC)/1000.0);
+  }
 
 #ifdef OUTPUT_PAIRS_TO_SCREEN
   // Output pair counts
-  printf("r          XX(r):\n");
+  if(mpi_rank == 0) 
+    printf("r          XX(r):\n");
   for(i = 0; i < nbins; i++){
     double r = rmax / (double) nbins * (i+0.5);
     double xi = XX[i];
-    printf("%lf   %lf\n", r, xi);    
+    if(mpi_rank == 0)
+      printf("%lf   %lf\n", r, xi);    
   }
 #endif
 }
@@ -699,10 +798,12 @@ void grid_pair_counting(Grid *grid, PairCountBinning *pc){
 GalaxyCatalog *read_galaxies_from_file(char *filename, int ngalaxies){
   int i;
 
-  printf("\n====================================\n"); 
-  printf("Reading from file [%s]\n", filename); 
-  printf("====================================\n"); 
-  printf("Galaxy file has %d galaxies\n",ngalaxies);
+  if(mpi_rank == 0){
+    printf("\n====================================\n"); 
+    printf("Reading from file [%s]\n", filename); 
+    printf("====================================\n"); 
+    printf("Galaxy file has %d galaxies\n",ngalaxies);
+  }
 
   // Allocate particle array
   GalaxyCatalog *cat = malloc(sizeof(GalaxyCatalog));
@@ -710,7 +811,7 @@ GalaxyCatalog *read_galaxies_from_file(char *filename, int ngalaxies){
   Galaxy *allgalaxies = cat->galaxies;
   cat->ngalaxies = ngalaxies;
   cat->allocated = 1;
-    
+
   double sum_w = 0.0, sum_w2 = 0.0;
 
   // Read the data
@@ -749,9 +850,10 @@ GalaxyCatalog *read_galaxies_from_file(char *filename, int ngalaxies){
     sum_w2 += w*w;
   }
   fclose(fp);
-  
+
   // The mean weight and RMS
-  printf("Mean weight: %lf  RMS: %lf\n", sum_w/(double)ngalaxies, sqrt(sum_w2/(double)ngalaxies));
+  if(mpi_rank == 0)
+    printf("Mean weight: %lf  RMS: %lf\n", sum_w/(double)ngalaxies, sqrt(sum_w2/(double)ngalaxies));
   cat->sum_w = sum_w;
   cat->sum_w2 = sum_w2;
 
@@ -768,12 +870,12 @@ void compute_boxsize_shift_positions(GalaxyCatalog *cat, GalaxyCatalog *cat2, do
   Galaxy *galaxies = cat->galaxies;
   int ngalaxies2 = cat2->ngalaxies;
   Galaxy *galaxies2 = cat2->galaxies;
-  
+
   // Compute max and min position
   double max_x = -1e100, min_x = 1e100;
   double max_y = -1e100, min_y = 1e100;
   double max_z = -1e100, min_z = 1e100;
- 
+
   int i;
   for(i = 0; i < ngalaxies; i++){
     double *Pos = &galaxies[i].x[0];
@@ -814,16 +916,19 @@ void compute_boxsize_shift_positions(GalaxyCatalog *cat, GalaxyCatalog *cat2, do
   max_z = max_z-min_z;
 
   // The min/max positions (separations)
-  printf("\n====================================\n");
-  printf("Shifting particles and computing boxsize:\n");
-  printf("====================================\n");
-  printf("Min/Max X position: 0.0 -> %5.2lf Mpc/h\n", max_x);
-  printf("Min/Max Y position: 0.0 -> %5.2lf Mpc/h\n", max_y);
-  printf("Min/Max Z position: 0.0 -> %5.2lf Mpc/h\n", max_z);
-  
+  if(mpi_rank == 0){
+    printf("\n====================================\n");
+    printf("Shifting particles and computing boxsize:\n");
+    printf("====================================\n");
+    printf("Min/Max X position: 0.0 -> %5.2lf Mpc/h\n", max_x);
+    printf("Min/Max Y position: 0.0 -> %5.2lf Mpc/h\n", max_y);
+    printf("Min/Max Z position: 0.0 -> %5.2lf Mpc/h\n", max_z);
+  }
+
   // The largest displacement in either direction
   *box = 1.01 * MAX(max_x, MAX(max_y, max_z));
-  printf("The boxsize we will use is %5.2lf Mpc/h\n", *box);
+  if(mpi_rank == 0)
+    printf("The boxsize we will use is %5.2lf Mpc/h\n", *box);
 }
 
 //====================================================
@@ -832,7 +937,7 @@ void compute_boxsize_shift_positions(GalaxyCatalog *cat, GalaxyCatalog *cat2, do
 // and initalizes all th cells
 //====================================================
 Grid *create_grid(int ngalaxies, double rmax, double box){
-  
+
   //====================================================
   // Estimate optimal size of grid
   //====================================================
@@ -852,11 +957,13 @@ Grid *create_grid(int ngalaxies, double rmax, double box){
   grid->cell_size = box/(double) ngrid;
   grid->allocated = 1;
 
-  printf("\n====================================\n"); 
-  printf("Creating new grid\n"); 
-  printf("====================================\n"); 
-  printf("ngrid = %i [min(%i,%i)] CellSize: %lf Mpc/h\n", ngrid, ngrid1, ngrid2, box/(double) ngrid);
-  printf("Total number of cells: [%i] Galaxies that will be added to grid: [%i]\n", NcellTotal, ngalaxies);
+  if(mpi_rank == 0){
+    printf("\n====================================\n"); 
+    printf("Creating new grid\n"); 
+    printf("====================================\n"); 
+    printf("ngrid = %i [min(%i,%i)] CellSize: %lf Mpc/h\n", ngrid, ngrid1, ngrid2, box/(double) ngrid);
+    printf("Total number of cells: [%i] Galaxies that will be added to grid: [%i]\n", NcellTotal, ngalaxies);
+  }
 
   //====================================================
   // Initialize the number of galaxies in all cells
@@ -891,11 +998,11 @@ void add_galaxies_to_cells(Grid *grid, GalaxyCatalog *cat){
   Cell *cells = grid->cells;
   int ngrid   = grid->ngrid;
   double cell_size = grid->cell_size;
-  
+
   // Fetch data from galaxy catalog
   Galaxy *allgalaxies = cat->galaxies;
   int ngalaxies       = cat->ngalaxies;
-  
+
   // Other variables
   int NcellTotal = pow3(ngrid), i;
   int max_ix = 0, max_iy = 0, max_iz = 0;
@@ -948,10 +1055,12 @@ void add_galaxies_to_cells(Grid *grid, GalaxyCatalog *cat){
     if(cells[i].np == 0) nempty += 1;
   }
 
-  printf("\n====================================\n");
-  printf("Adding galaxies to grid\n");
-  printf("====================================\n");
-  printf("There are [%i] empty cells (%lf %%) in the grid\n", nempty, (double)nempty / (double) NcellTotal * 100.0);
+  if(mpi_rank == 0){
+    printf("\n====================================\n");
+    printf("Adding galaxies to grid\n");
+    printf("====================================\n");
+    printf("There are [%i] empty cells (%lf %%) in the grid\n", nempty, (double)nempty / (double) NcellTotal * 100.0);
+  }
 
   //====================================================
   // Go through galaxies and add them to the grid cells
@@ -1025,11 +1134,13 @@ void grid_cross_pair_counting(Grid *grid, Grid *grid2, PairCountBinning *pc){
 
   // Initialize OpenMP
   int nthreads = 1, id = 0;
-#ifdef OMP 
+#ifdef USE_OMP 
 #pragma omp parallel
   {
     if(omp_get_thread_num() == 0) nthreads = omp_get_num_threads();
   }
+#elif defined(USE_MPI)
+  nthreads = mpi_size;
 #endif
 
   // Initialize binning
@@ -1042,15 +1153,18 @@ void grid_cross_pair_counting(Grid *grid, Grid *grid2, PairCountBinning *pc){
     }
   }
 
-  printf("\n====================================\n");
-  printf("Cross pair counts using grid:\n");
-  printf("====================================\n");
-  printf("Using n = %i threads\n", nthreads);
+  if(mpi_rank == 0){
+    printf("\n====================================\n");
+    printf("Cross pair counts using grid:\n");
+    printf("====================================\n");
+    printf("Using n = %i threads\n", nthreads);
+  }
 
   // How many cells in each direction we must search in the second grid
   int delta_ncells2 = (int)(ceil(rmax / cell_size2)) + 2;
-  printf("We will go left and right: [%i] cells. The corresponding distance: +/-[%lf] Mpc/h\n", 
-      delta_ncells2,  delta_ncells2 * cell_size2);
+  if(mpi_rank == 0)
+    printf("We will go left and right: [%i] cells. The corresponding distance: +/-[%lf] Mpc/h\n", 
+        delta_ncells2,  delta_ncells2 * cell_size2);
 
   //==========================================================
   // Loop over all the cells in grid1
@@ -1060,12 +1174,21 @@ void grid_cross_pair_counting(Grid *grid, Grid *grid2, PairCountBinning *pc){
 
   int ix0, num_processed = 0;
   clock_t start = clock(), diff;
-#ifdef OMP 
+  int istart = 0, iend = max_ix + 1;
+#ifdef USE_OMP 
 #pragma omp parallel for private(id) reduction(+:pairs_dist2) reduction(+:pairs_dist) schedule(dynamic)
+#elif defined(USE_MPI)
+  int i_per_task = (max_ix + 1) / nthreads;
+  istart = i_per_task * mpi_rank;
+  iend   = i_per_task * (mpi_rank + 1);
+  if(mpi_rank == mpi_size - 1) iend = max_ix + 1;
+  MPI_Barrier(MPI_COMM_WORLD);
 #endif
-  for(ix0 = 0; ix0 <= max_ix; ix0++){
-#ifdef OMP 
+  for(ix0 = istart; ix0 < iend; ix0++){
+#ifdef USE_OMP 
     id = omp_get_thread_num();
+#elif defined(USE_MPI)
+    id = mpi_rank;
 #else
     id = 0;
 #endif
@@ -1114,7 +1237,7 @@ void grid_cross_pair_counting(Grid *grid, Grid *grid2, PairCountBinning *pc){
 
                 // Index of neighboring cell
                 int index_neighbor_cell = (ix2*ngrid2 + iy2)*ngrid2 + iz2;
-                
+
                 // Pointer to neighboring cell
                 Cell *neighborcell = &cells2[index_neighbor_cell];
 
@@ -1124,7 +1247,7 @@ void grid_cross_pair_counting(Grid *grid, Grid *grid2, PairCountBinning *pc){
                 // Loop over galaxies in neighbor cells
                 int ipart_neighbor_cell;
                 for(ipart_neighbor_cell = 0; ipart_neighbor_cell < npart_neighbor_cell; ipart_neighbor_cell++){
-                  
+
                   // Galaxy in neighboring cell
                   Galaxy *curpart_neighbor_cell = &neighborcell->galaxy[ipart_neighbor_cell];
 
@@ -1165,12 +1288,24 @@ void grid_cross_pair_counting(Grid *grid, Grid *grid2, PairCountBinning *pc){
     }
     
     // Show progress...
+#ifdef USE_OMP
 #pragma omp critical
     {
       printf("Processed (%4i / %4i)   (ThreadID: %3i)\n", num_processed, max_ix, id);
       num_processed++;
     }
+#endif
   }
+
+#ifdef USE_MPI
+  // Gather results from all CPUs
+  double *recv = malloc(sizeof(double)*nbins*nthreads);
+  MPI_Allgather(XY_threads[mpi_rank], nbins, MPI_DOUBLE, recv, nbins, MPI_DOUBLE, MPI_COMM_WORLD);
+  for(id = 0; id < nthreads; id++)
+    for(i = 0; i < nbins; i++)
+      XY_threads[id][i] = recv[id * nbins + i];
+  free(recv);
+#endif
 
   // Sum up results from different threads
   for(id = 0; id < nthreads; id++){
@@ -1183,19 +1318,23 @@ void grid_cross_pair_counting(Grid *grid, Grid *grid2, PairCountBinning *pc){
 
   // Show timing and how many dist^2 and square roots we had to compute
   diff = clock() - start;
-  printf("We have computed dist^2 for [%.0lf] pairs out of [%.0lf]. That is %lf%%\n", pairs_dist2, 
-      (double)ngalaxies * (double)ngalaxies2, pairs_dist2/((double)ngalaxies*(double) ngalaxies2) * 100.0);
-  printf("We have computed sqrt(dist^2) for [%.0lf] pairs out of [%.0lf]. That is %lf%%\n", pairs_dist, 
-      (double)ngalaxies * (double)ngalaxies2, pairs_dist/((double)ngalaxies*(double) ngalaxies2) * 100.0);
-  printf("This took: [%8.3lf] sec\n", (double)(1000 * diff / CLOCKS_PER_SEC)/1000.0);
+  if(mpi_rank == 0){
+    printf("We have computed dist^2 for [%.0lf] pairs out of [%.0lf]. That is %lf%%\n", pairs_dist2, 
+        (double)ngalaxies * (double)ngalaxies2, pairs_dist2/((double)ngalaxies*(double) ngalaxies2) * 100.0);
+    printf("We have computed sqrt(dist^2) for [%.0lf] pairs out of [%.0lf]. That is %lf%%\n", pairs_dist, 
+        (double)ngalaxies * (double)ngalaxies2, pairs_dist/((double)ngalaxies*(double) ngalaxies2) * 100.0);
+    printf("This took: [%8.3lf] sec\n", (double)(1000 * diff / CLOCKS_PER_SEC)/1000.0);
+  }
 
 #ifdef OUTPUT_PAIRS_TO_SCREEN
   // Output cross pair counts
-  printf("r          XY(r):\n");
+  if(mpi_rank == 0)
+    printf("r          XY(r):\n");
   for(i = 0; i < nbins; i++){
     double r = rmax / (double) nbins * (i+0.5);
     double xi = XY[i];
-    printf("%lf   %lf\n", r, xi);    
+    if(mpi_rank == 0)
+      printf("%lf   %lf\n", r, xi);    
   }
 #endif
 }
@@ -1212,20 +1351,25 @@ void compute_correlation_function(PairCountBinning *DD, PairCountBinning *DR, Pa
   double norm_RR = RR->norm;
   int i;
 
-  printf("\n====================================\n");
-  printf("Correlation function using LS estimator:\n");
-  printf("====================================\n");
-  printf("Outputfile [%s] has format [r  xi  err_xi  DD  DR  RR]\n", filename);
+  if(mpi_rank == 0){
+    printf("\n====================================\n");
+    printf("Correlation function using LS estimator:\n");
+    printf("====================================\n");
+    printf("Outputfile [%s] has format [r  xi  err_xi  DD  DR  RR]\n", filename);
+  }
+
+  FILE *fp;
+  if(mpi_rank == 0)
+    fp = fopen(filename, "w");
   
-  FILE *fp = fopen(filename, "w");
   for(i = 0; i < nbins; i++){
     // Center of bin
     double r = rmax / (double) nbins * (i+0.5);
-    
+
     // Compute correlation function with Poisson errors
     double corr = 0.0, err_corr = 0.0;
     if(DD->paircount[i] != 0.0){
-      
+
       double one_over_sqrtDD = 1.0/sqrt(DD->paircount[i]);
       double one_over_sqrtDR = 1.0/sqrt(DR->paircount[i]);
       double one_over_sqrtRR = 1.0/sqrt(RR->paircount[i]);
@@ -1233,19 +1377,22 @@ void compute_correlation_function(PairCountBinning *DD, PairCountBinning *DR, Pa
       double normed_DD = DD->paircount[i] / norm_DD;
       double normed_DR = DR->paircount[i] / norm_DR;
       double normed_RR = RR->paircount[i] / norm_RR;
-      
+
       corr = (normed_DD - 2.0*normed_DR + normed_RR) / normed_RR;
       err_corr = (1.0 + corr) * (one_over_sqrtDD + one_over_sqrtDR + one_over_sqrtRR);
     }
 
     // Output to file
+    if(mpi_rank == 0){
 #ifdef WEIGHTS
-    fprintf(fp,"%le  %le  %le  %le  %le  %le\n", r, corr, err_corr, DD->paircount[i], DR->paircount[i], RR->paircount[i]);
+      fprintf(fp,"%le  %le  %le  %le  %le  %le\n", r, corr, err_corr, DD->paircount[i], DR->paircount[i], RR->paircount[i]);
 #else
-    fprintf(fp,"%le  %le  %le  %d   %d   %d\n",  r, corr, err_corr, (int)DD->paircount[i], (int)DR->paircount[i], (int)RR->paircount[i]);
+      fprintf(fp,"%le  %le  %le  %d   %d   %d\n",  r, corr, err_corr, (int)DD->paircount[i], (int)DR->paircount[i], (int)RR->paircount[i]);
 #endif
+    }
   }
-  fclose(fp);
+  if(mpi_rank == 0)
+    fclose(fp);
 }
 
 //====================================================
@@ -1323,7 +1470,7 @@ void outputGalaxies(GalaxyCatalog *cat, char *filename){
 int ode_rofz(double z, const double r[], double drdz[], void *params){
   const double Hubble_Length_in_Mpch = SPEED_OF_LIGHT_IN_KM_PER_SEC / 100.0;
   double OmegaM = *(double *) params;
-  
+
   drdz[0] =  Hubble_Length_in_Mpch / sqrt(OmegaM*pow3(1.0+z) + 1.0 - OmegaM);
   return GSL_SUCCESS;
 }

@@ -26,11 +26,13 @@ Grid *create_grid(int ngalaxies, double rmax, double box){
   grid->cell_size = box/(double) ngrid;
   grid->allocated = 1;
 
-  printf("\n====================================\n"); 
-  printf("Creating new grid\n"); 
-  printf("====================================\n"); 
-  printf("ngrid = %i [min(%i,%i)] CellSize: %lf Mpc/h\n", ngrid, ngrid1, ngrid2, box/(double) ngrid);
-  printf("Total number of cells: [%i] Galaxies that will be added to grid: [%i]\n", NcellTotal, ngalaxies);
+  if(mpi_rank == 0){
+    printf("\n====================================\n"); 
+    printf("Creating new grid\n"); 
+    printf("====================================\n"); 
+    printf("ngrid = %i [min(%i,%i)] CellSize: %lf Mpc/h\n", ngrid, ngrid1, ngrid2, box/(double) ngrid);
+    printf("Total number of cells: [%i] Galaxies that will be added to grid: [%i]\n", NcellTotal, ngalaxies);
+  }
 
   //====================================================
   // Initialize the number of galaxies in all cells
@@ -52,11 +54,11 @@ void add_galaxies_to_cells(Grid *grid, GalaxyCatalog *cat){
   Cell *cells = grid->cells;
   int ngrid   = grid->ngrid;
   double cell_size = grid->cell_size;
-  
+
   // Fetch data from galaxy catalog
   Galaxy *allgalaxies = cat->galaxies;
   int ngalaxies       = cat->ngalaxies;
-  
+
   // Other variables
   int NcellTotal = pow3(ngrid), i;
   int max_ix = 0, max_iy = 0, max_iz = 0;
@@ -109,10 +111,12 @@ void add_galaxies_to_cells(Grid *grid, GalaxyCatalog *cat){
     if(cells[i].np == 0) nempty += 1;
   }
 
-  printf("\n====================================\n");
-  printf("Adding galaxies to grid\n");
-  printf("====================================\n");
-  printf("There are [%i] empty cells (%lf %%) in the grid\n", nempty, (double)nempty / (double) NcellTotal * 100.0);
+  if(mpi_rank == 0){
+    printf("\n====================================\n");
+    printf("Adding galaxies to grid\n");
+    printf("====================================\n");
+    printf("There are [%i] empty cells (%lf %%) in the grid\n", nempty, (double)nempty / (double) NcellTotal * 100.0);
+  }
 
   //====================================================
   // Go through galaxies and add them to the grid cells

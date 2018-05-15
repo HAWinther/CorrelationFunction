@@ -4,15 +4,15 @@
 
 SHELL := /bin/bash
 
-# Set compiler
-CC = gcc-mp-6
+# Set compiler (MPI: mpicc-openmpi-gcc6)
+CC = gcc-mp-6 
 
 # GSL library
 LIB = -L/opt/local/lib/ -lgsl -lm
 INC = -I/opt/local/include/
 
-# Options
-OPTIONS = -DOMP -DWEIGHTS
+# Options (-DUSE_MPI for MPI version)
+OPTIONS = -DUSE_OMP -DWEIGHTS
 C = -O3 -fopenmp $(OPTIONS)
 
 # Executable

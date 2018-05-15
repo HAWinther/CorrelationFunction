@@ -1,6 +1,7 @@
 #ifndef _BINNING_H
 #define _BINNING_H
 #include <stdlib.h>
+#include "global.h"
 
 //====================================================
 // Container for a binning

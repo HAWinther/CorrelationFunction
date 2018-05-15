@@ -1,5 +1,10 @@
 #!/bin/bash
 
+#=======================================================
+# Testrun of code. Expected output is given in [corr.out]
+# Assuming OpenMP version with weights
+#=======================================================
+
 codedir="../"
 thisdir=$(pwd)
 

@@ -9,13 +9,22 @@
 #include "gsl_wrapper.h"
 #include "cosmo.h"
 
+int mpi_rank = 0, mpi_size = 1;
+
 int main(int argc, char **argv){
+
+#ifdef USE_MPI
+  MPI_Init(&argc, &argv);
+  MPI_Comm_rank(MPI_COMM_WORLD, &mpi_rank);
+  MPI_Comm_size(MPI_COMM_WORLD, &mpi_size);
+#endif
 
   //====================================================
   // Read parameters from stdin
   //====================================================
   if(argc < 7){
-    printf("Run as ./corr [filename_mock] [filename_random] [filename_output] [nbins] [rmax] [OmegaM]\n");
+    if(mpi_rank == 0)
+      printf("Run as ./corr [filename_mock] [filename_random] [filename_output] [nbins] [rmax] [OmegaM]\n");
     exit(1);
   }
 
@@ -27,33 +36,38 @@ int main(int argc, char **argv){
   double OmegaM           = atof(argv[6]);
   double box;
 
-  printf("\n====================================\n");
-  printf("Parameters:\n");
-  printf("====================================\n");
-  printf("Galaxy Catalog: [%s]\n", filename_galaxies);
-  printf("Random Catalog: [%s]\n", filename_random);
-  printf("Rmax:           [%5.2lf] Mpc/h\n", rmax);
-  printf("nbins:          [%i]\n", nbins);
-  printf("OmegaM:         [%0.3lf]\n", OmegaM);
+  if(mpi_rank == 0){
+    printf("\n====================================\n");
+    printf("Parameters:\n");
+    printf("====================================\n");
+    printf("Galaxy Catalog: [%s]\n", filename_galaxies);
+    printf("Random Catalog: [%s]\n", filename_random);
+    printf("Rmax:           [%5.2lf] Mpc/h\n", rmax);
+    printf("nbins:          [%i]\n", nbins);
+    printf("OmegaM:         [%0.3lf]\n", OmegaM);
 #ifdef WEIGHTS
-  printf("We are including the weights\n");
+    printf("We are including the weights\n");
 #else  
-  printf("We are NOT including the weights\n");
+    printf("We are NOT including the weights\n");
 #endif
 #ifdef BRUTEFORCE
-  printf("Will compute pair counts BRUTE-FORCE\n");
+    printf("Will compute pair counts BRUTE-FORCE\n");
 #endif
-#ifdef OMP
+#ifdef USE_OMP
 #pragma omp parallel
-  {
-    if(omp_get_thread_num() == 0) 
-      printf("We are using OpenMP nthreads = %i\n", omp_get_num_threads());
-  }
+    {
+      if(omp_get_thread_num() == 0) 
+        printf("We are using OpenMP nthreads = %i\n", omp_get_num_threads());
+    }
+#elif defined(USE_MPI)
+    if(mpi_rank == 0)
+      printf("We are using MPI nsize = %i\n", mpi_size);
 #else
-  printf("We are NOT using OpenMP\n");
+    printf("We are NOT using OpenMP or MPI\n");
 #endif
-  printf("====================================\n");
-  
+    printf("====================================\n");
+  }
+
   //====================================================
   // Create a spline of r(z)
   //====================================================
@@ -114,7 +128,7 @@ int main(int argc, char **argv){
   grid_pair_counting(random_grid, RR);
 #endif
   compute_correlation_function(DD, DR, RR, filename_output);
-    
+
   //====================================================
   // Free up memory allocated above
   //====================================================
@@ -127,6 +141,9 @@ int main(int argc, char **argv){
   free_binning(RR);
   Free_GSL_Spline(global_spline_rofz);
 
+#ifdef USE_MPI
+  MPI_Finalize();
+#endif
   return 0;
 }
 
