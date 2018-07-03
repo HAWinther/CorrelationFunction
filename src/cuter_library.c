@@ -1436,7 +1436,7 @@ GSL_Spline* create_rofz_spline(double OmegaM){
 //====================================================
 // Take a list of galaxies and copy this into a galaxy catalog
 //====================================================
-GalaxyCatalog *crate_galaxy_catalog_from_galaxies_copy(Galaxy *galaxies, int ngalaxies){
+GalaxyCatalog *create_galaxy_catalog_from_galaxies_copy(Galaxy *galaxies, int ngalaxies){
   // Allocate particle array
   GalaxyCatalog *cat = (GalaxyCatalog *) malloc(sizeof(GalaxyCatalog));
   cat->galaxies = (Galaxy *) malloc(sizeof(Galaxy)*ngalaxies);
@@ -1660,6 +1660,7 @@ BinnedCorrelationFunction *CUTER_correlation_function(char *filename_galaxies, c
 
 //====================================================
 // Compute correction function from an array of galaxies
+// NB: this modifies the Galaxy positions by shifting them!
 //====================================================
 BinnedCorrelationFunction *CUTER_correlation_function_from_galaxies(Galaxy *galaxies, Galaxy *random, int ngalaxies, int nrandom, int nbins, double rmax, double OmegaM){
   global_spline_rofz = create_rofz_spline(OmegaM); 
@@ -1671,6 +1672,22 @@ BinnedCorrelationFunction *CUTER_correlation_function_from_galaxies(Galaxy *gala
   
   free(galaxy_cat);
   free(random_cat);
+  return corr_binning;
+}
+
+//====================================================
+// Compute correction function from an array of galaxies
+//====================================================
+BinnedCorrelationFunction *CUTER_correlation_function_from_galaxies_copy(Galaxy *galaxies, Galaxy *random, int ngalaxies, int nrandom, int nbins, double rmax, double OmegaM){
+  global_spline_rofz = create_rofz_spline(OmegaM); 
+  
+  GalaxyCatalog *galaxy_cat = create_galaxy_catalog_from_galaxies_copy(galaxies, ngalaxies);
+  GalaxyCatalog *random_cat = create_galaxy_catalog_from_galaxies_copy(random,   nrandom);
+  
+  BinnedCorrelationFunction *corr_binning = CUTER_correlation_function_from_catalog(galaxy_cat, random_cat, nbins, rmax, OmegaM);
+  
+  free_cat(galaxy_cat);
+  free_cat(random_cat);
   return corr_binning;
 }
 

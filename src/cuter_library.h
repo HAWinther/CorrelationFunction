@@ -144,12 +144,16 @@ BinnedCorrelationFunction *CUTER_correlation_function_periodic_from_galaxies(
 
 //=========================================================
 // Methods for survey data (LZ estimator)
+// NB: CUTER_correlation_function_from_galaxies modifies galaxy positions!
+// Use the _copy method to avoid changing them
 //=========================================================
 BinnedCorrelationFunction *CUTER_correlation_function(
     char *filename_galaxies, char* filename_random, int file_format, int nbins, double rmax, double OmegaM);
 BinnedCorrelationFunction *CUTER_correlation_function_from_catalog(
     GalaxyCatalog *galaxy_cat, GalaxyCatalog *random_cat, int nbins, double rmax, double OmegaM);
 BinnedCorrelationFunction *CUTER_correlation_function_from_galaxies(
+    Galaxy *galaxies, Galaxy *random, int ngalaxies, int nrandom, int nbins, double rmax, double OmegaM);
+BinnedCorrelationFunction *CUTER_correlation_function_from_galaxies_copy(
     Galaxy *galaxies, Galaxy *random, int ngalaxies, int nrandom, int nbins, double rmax, double OmegaM);
 
 #endif

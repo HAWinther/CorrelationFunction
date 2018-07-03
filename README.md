@@ -1,14 +1,17 @@
 # CorrelationFunction
 Author: Hans A. Winther, 2018
 
-A very simple library for use in C / C++ to compute the radial monopole correlation function for data from a galaxy survey / mocks using the LZ estimator or from a periodic simulations box. Using grids to speed up the computation. Written for test purposes and well commented so should be very easy to modify. Has the same (or faster) speed as [CUTE](https://github.com/damonge/CUTE) with OpenMP (but does not have half of the features as CUTE so use that or SWOT instead for scientific purposes).
+A very simple library for use in C / C++ to compute the radial monopole correlation function for data from a galaxy survey / mocks using the LZ estimator or from a periodic simulations box (no masks implemented). Using grids to speed up the computation. Written for test purposes and well commented so should be very easy to modify if needed. Has the same (or faster) speed as [CUTE](https://github.com/damonge/CUTE) with OpenMP (but does not have half of the features as CUTE so use that or SWOT instead for scientific purposes).
 
-See [test\_simulation] for how to use call the library for periodic simulations boxes.
+See [example\_simulation] for how to use call the library for the case of a periodic simulation box.
 
-See [test\_survey] for how to use call the library for survey data / galaxy mocks (NB: no masks implemented).
+See [example\_survey] for how to use call the library for survey data / galaxy mocks.
 
-Input files in this survey case is assumed to either have format: [RA, DEC, z, (weight)] with RA/DEC in degrees or [X, Y, Z, (weight)] with positions in Mpc/h.
-Rmax is also given in Mpc/h. One can also call the code directly by supplying an array of galaxies (see cuter\_library.h for how different call options) defined in galaxy.h This struct can be freely modified as long as it has x[3] and w (if weights is used).
+Input files in the survey case is assumed to either have format: [RA, DEC, z, (weight)] with RA/DEC in degrees or [X, Y, Z, (weight)] with positions in Mpc/h. For simulation boxes we always assume [X, Y, Z, (weight)] with positions in [0, Box].
+
+The code uses linear binning in [r] and the maximum radius we compute the correaltion function up to, Rmax, is assumed to be in Mpc/h for survey data and the same units as the boxsize for simulation boxes. 
+
+Instead of reading data from file one can also call the code directly by supplying an array of galaxies (see cuter\_library.h for how different call options) defined in [galaxy.h]. This struct can be freely modified as long as it has x[3] and w (if weights is used). NB: for the survey option the method [CUTER\_correlation\_function\_from\_galaxies] modifies the galaxies/random positions provided to fit them into a simple box. If this is undesirable use [CUTER\_correlation\_function\_from\_galaxies\_copy] to make an internal copy and work with this.
 
 The library returns a struct with [r, xi(r), poisson\_err(r), DD(r), DR(r), RR(r)] or [r, xi(r), poisson\_err(r), DD(r)] for a periodic box. 
 

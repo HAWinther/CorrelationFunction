@@ -18,9 +18,9 @@ int main(int argc, char **argv){
   //=================================
   // Set the parameters
   //=================================
-  double rmax = 192.0;
-  double OmegaM = 0.3;
-  int nbins   = 32;
+  double rmax    = 192.0;
+  double OmegaM  = 0.3;
+  int nbins      = 32;
   char filename_galaxy[100] = "galaxy_mock.dat";
   char filename_random[100] = "random.dat";
   
