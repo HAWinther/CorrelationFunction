@@ -9,9 +9,9 @@ See [example\_survey] for how to use call the library for survey data / galaxy m
 
 Input files in the survey case is assumed to either have format: [RA, DEC, z, (weight)] with RA/DEC in degrees or [X, Y, Z, (weight)] with positions in Mpc/h. For simulation boxes we always assume [X, Y, Z, (weight)] with positions in [0, Box].
 
-The code uses linear binning in [r] and the maximum radius we compute the correaltion function up to, Rmax, is assumed to be in Mpc/h for survey data and the same units as the boxsize for simulation boxes. 
+The code uses linear binning in [r] from [Rmin] up to [Rmax] which are assumed to be in Mpc/h for survey data and the same units as the boxsize for simulation boxes. To use logarithmic binning simply activate this by setting [cuter\_library\_logbin = 1] before calling the library.
 
-Instead of reading data from file one can also call the code directly by supplying an array of galaxies (see cuter\_library.h for how different call options) defined in [galaxy.h]. This struct can be freely modified as long as it has x[3] and w (if weights is used). NB: for the survey option the method [CUTER\_correlation\_function\_from\_galaxies] modifies the galaxies/random positions provided to fit them into a simple box. If this is undesirable use [CUTER\_correlation\_function\_from\_galaxies\_copy] to make an internal copy and work with this.
+Instead of reading data from file one can also call the code directly by supplying an array of galaxies (see cuter\_library.h for how different call options) defined in [galaxy.h]. This struct can be freely modified as long as it has x[3]  (and w if weights is used). NB: for the survey option the method [CUTER\_correlation\_function\_from\_galaxies] modifies the galaxies/random positions provided to fit them into a simple box. If this is undesirable use [CUTER\_correlation\_function\_from\_galaxies\_copy] to make an internal copy and work with this.
 
 The library returns a struct with [r, xi(r), poisson\_err(r), DD(r), DR(r), RR(r)] or [r, xi(r), poisson\_err(r), DD(r)] for a periodic box. 
 
