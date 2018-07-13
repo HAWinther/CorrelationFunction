@@ -50,19 +50,21 @@ void brute_force_pair_counting(GalaxyCatalog *cat, PairCountBinning *pc, double 
   // Fetch data from galaxy catalog
   Galaxy *allgalaxies = cat->galaxies;
   int ngalaxies       = cat->ngalaxies;
-  
+
   // Fetch data from binning
   int nbins   = pc->nbins;
   double rmin = pc->rmin;
   double rmax = pc->rmax;
   double *XX  = pc->paircount;
- 
+
   // Other variables
   double pairs_dist = 0.0, pairs_dist2 = 0.0;
-  double nbins_over_rmax = nbins / rmax, rmax2 = rmax * rmax, rmin2 = rmin * rmin;
+  double rmax2 = rmax * rmax, rmin2 = rmin * rmin;
+  double nbins_over_rmaxrmin    = nbins / (rmax - rmin);
   double nbins_over_logrmaxrmin = nbins / log(rmax/rmin);
-  int i;
   
+  int i;
+
   // Initialize OpenMP
   int nthreads = 1, id = 0;
 #if defined(USE_OMP) 
@@ -134,7 +136,7 @@ void brute_force_pair_counting(GalaxyCatalog *cat, PairCountBinning *pc, double 
         if(cuter_library_logbin){
           ibin = (int) (log(dist/rmin) * nbins_over_logrmaxrmin);
         } else {
-          ibin = (int) ((dist - rmin) * nbins_over_rmax);
+          ibin = (int) ((dist - rmin) * nbins_over_rmaxrmin);
         }
 
 #ifdef WEIGHTS
@@ -204,7 +206,8 @@ void brute_force_cross_pair_counting(GalaxyCatalog *cat, GalaxyCatalog *cat2, Pa
 
   // Other variables
   double pairs_dist = 0.0, pairs_dist2 = 0.0;
-  double nbins_over_rmax = nbins / rmax, rmax2 = rmax * rmax, rmin2 = rmin * rmin;
+  double rmax2 = rmax * rmax, rmin2 = rmin * rmin;
+  double nbins_over_rmaxrmin    = nbins / (rmax - rmin);
   double nbins_over_logrmaxrmin = nbins / log(rmax/rmin);
   int i;
 
@@ -279,7 +282,7 @@ void brute_force_cross_pair_counting(GalaxyCatalog *cat, GalaxyCatalog *cat2, Pa
         if(cuter_library_logbin){
           ibin = (int) (log(dist/rmin) * nbins_over_logrmaxrmin);
         } else {
-          ibin = (int) ((dist-rmin) * nbins_over_rmax);
+          ibin = (int) ((dist-rmin) * nbins_over_rmaxrmin);
         }
 
 #ifdef WEIGHTS
@@ -347,7 +350,8 @@ void grid_pair_counting(Grid *grid, PairCountBinning *pc, double box){
 
   // Other variables
   double pairs_dist2 = 0.0, pairs_dist = 0.0;
-  double nbins_over_rmax = nbins / rmax, rmax2 = rmax * rmax, rmin2 = rmin * rmin;
+  double rmax2 = rmax * rmax, rmin2 = rmin * rmin;
+  double nbins_over_rmaxrmin    = nbins / (rmax - rmin);
   double nbins_over_logrmaxrmin = nbins / log(rmax/rmin);
   int i;
 
@@ -530,7 +534,7 @@ void grid_pair_counting(Grid *grid, PairCountBinning *pc, double box){
                     if(cuter_library_logbin){
                       ibin = (int) (log(dist/rmin) * nbins_over_logrmaxrmin);
                     } else {
-                      ibin = (int) ((dist-rmin) * nbins_over_rmax);
+                      ibin = (int) ((dist-rmin) * nbins_over_rmaxrmin);
                     }
 
 #ifdef WEIGHTS
@@ -977,7 +981,8 @@ void grid_cross_pair_counting(Grid *grid, Grid *grid2, PairCountBinning *pc, dou
 
   // Other variables
   double pairs_dist2 = 0.0, pairs_dist = 0.0;
-  double nbins_over_rmax = nbins / rmax, rmax2 = rmax * rmax, rmin2 = rmin * rmin;
+  double rmax2 = rmax * rmax, rmin2 = rmin * rmin;
+  double nbins_over_rmaxrmin    = nbins / (rmax - rmin);
   double nbins_over_logrmaxrmin = nbins / log(rmax/rmin);
   int i;
 
@@ -1151,7 +1156,7 @@ void grid_cross_pair_counting(Grid *grid, Grid *grid2, PairCountBinning *pc, dou
                     if(cuter_library_logbin){
                       ibin = (int) (log(dist/rmin) * nbins_over_logrmaxrmin);
                     } else {
-                      ibin = (int) ((dist-rmin) * nbins_over_rmax);
+                      ibin = (int) ((dist-rmin) * nbins_over_rmaxrmin);
                     }
 
 #ifdef WEIGHTS
